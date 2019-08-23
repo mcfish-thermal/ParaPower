@@ -103,8 +103,8 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
 
 
             %% Voids Setup Hook
-            Types=MI.MatLib.GetParam('Type');
-            vmatnum=rollcall(strcmp(Types(rollcall),'IBC'));
+            Types=MI.MatLib.GetParam('Type');  %cell array of Types available in model mat library
+            vmatnum=rollcall(strcmp(Types(rollcall),'IBC')|strcmp(Types(rollcall),'IBC_SimInterface'));
             hint=zeros(1,length(vmatnum));
             Ta_void=hint;
 
@@ -119,7 +119,10 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             end
 
             %% Variable Q and State Initialization
-            Qmask=~cellfun('isempty',Q(:));  %return logical mask with ones where Qs are def
+            Qmask=~cellfun('isempty',Q(:)); 
+            %return logical mask with ones where Qs are nonzero. Those
+            %flagged for control through SimInterface are treated
+            %seperately
 
 
             
@@ -325,9 +328,19 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             
             obj=pre_step_hook(obj);
             
+            Ambient_T=zeros(length(obj.Ta_vec),length(GlobalTime));  
+            %hold IBC temperatures to load back into 4D results
+            Ambient_T(:,1)=obj.Ta_vec';
+            pre_m_res=T(:,2:end); post_m_res=pre_m_res;
+            
             for it=2:length(GlobalTime)
                 
                 T(:,it)=(A+Atrans)\(-B*obj.Ta_vec'+Qv(Map,it-1)+C);  %T is temps at the end of the it'th step, C holds info about temps prior to it'th step
+                
+                Ambient_T(:,it)=obj.Ta_vec';  %done every step to allow generalizing to changing boundary
+                pre_m_res(:,it-1)=obj.Storage(T(:,it),A);
+                
+                
                 
                 if meltable && not(isnan(GlobalTime(2))) %melting disabled for static analyses
                     %{
@@ -336,7 +349,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                                                                                                MI.MatLib.tmelt,Lv,K,CP,RHO);   %These arguments need to be restructured
                      %}                                                                      
                    
-                   [T(:,it),PH(:,it),changing,obj.K,obj.CP,obj.RHO]=obj.vec_Phase_Change(T(:,it),PH(:,it-1),Mat,Map,meltmask,...
+                   [T(:,it),PH(:,it),changing,obj.K,obj.CP,obj.RHO]=obj.vec_Phase_Change(T(:,it),PH(:,it-1),Mat,Map,obj.meltmask,...
                                                                             MI.MatLib.GetParamVector('k'), ...
                                                                             MI.MatLib.GetParamVector('k_l'), ...
                                                                             MI.MatLib.GetParamVector('cp'), ...
@@ -348,7 +361,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                     
                    [obj,T,PH,changing] = ph_ch_hook(obj,T,PH,changing,it);
                 end
-                
+                post_m_res(:,it-1)=obj.Storage(T(:,it),A);
                 if ~isnan(GlobalTime(2)) %update even after last timestep
                     %was not(isnan(GlobalTime(2))) && it~=length(GlobalTime)  %Do we have timesteps to undertake?
                     
@@ -378,6 +391,11 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                 obj=post_step_hook(obj);
             end
             
+            res_sum_l2=sum((pre_m_res-post_m_res).^2,1);
+            res_sum_l1=sum(abs(pre_m_res-post_m_res),1);
+            vol_res_l1=sum(abs(pre_m_res-post_m_res).*vol(Map),1);
+            %figure; plot(GlobalTime(2:end),vol_res_l1)
+            
             Tres=zeros(numel(Mat),size(T,2)-1); % Nodal temperature results
             PHres=Tres;
             T_in=zeros(numel(Mat),1);
@@ -385,6 +403,11 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             
             T_in(Mat>0,:)=T(:,1);
             Tres(Mat>0,:)=T(:,2:end);
+            [vn,fh_index]=unique(fullheader(fullheader<0));
+            for fhi=fh_index'
+               T_in(Mat==fullheader(fhi))=Ambient_T(fhi,1);
+               Tres(Mat==fullheader(fhi),:)=repmat(Ambient_T(fhi,2:end),[nnz(Mat==fullheader(fhi)) 1]);
+            end
             PH_in(Mat>0,:)=PH(:,1);
             PHres(Mat>0,:)=PH(:,2:end);
             
@@ -505,6 +528,14 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             %  A is n x n where n = length(Mat), B is n x m where m is
             % number of nonzero h, and Ext = eye(m).  Interior boundary voids, custom
             % connectivity, and null materials not handled by this routine.  Connectivity to null boundaries are included in Bexp.
+
+            % See also kronecker tensor product for Laplacian Operator Matrix (check help on 'kron') - 
+            % Faster performance? Step up to 3D?
+            % n = 5;
+            % I = speye(n,n);
+            % E = sparse(2:n,1:n-1,1,n,n);
+            % D = E+E'-2*I;
+            % A = kron(D,I)+kron(I,D);
             
             Map=reshape(1:numel(Mat),size(Mat)); %x,y,z
             nodes=numel(Map);  %number of rows of A and B
@@ -528,7 +559,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             % Creating sparse triplet vectors (row,column,value)
             i=repmat([1:nodes]',6,1);
             j=[rowup(:); rowdown(:); colup(:); coldown(:); layup(:); laydown(:)];
-            v=[ones(nodes*2,1); 2*ones(nodes*2,1); 3*ones(nodes*2,1)];
+            v=[ones(nodes,1); -1*ones(nodes,1); 2*ones(nodes,1); -2*ones(nodes,1); 3*ones(nodes,1); -3*ones(nodes,1)];
             
             Full=sparse(i,j,v,nodes,nodes+numel(h));
 
@@ -536,7 +567,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             Bexp=Full(:,numel(Mat)+1:end);
             B(:,:)=Bexp(:,h~=0);
             
-            if ~issymmetric(A)
+            if ~issymmetric(A,'skew')
                 error('Symmetry of A violated')
             elseif nnz(Full)/size(Full,1)~=6
                 warning('Non-standard connectivity')
@@ -569,21 +600,28 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                     remap_full = [find(~voids); find(voids)];
                     remain = nnz(~voids);
                     
+                    %Rearrange
                     A(:,:)=A(remap_full,remap_full);
                     B(:,:)=B(remap_full,:);
                     Map(:)=Map(remap_full);
                     Mat(:)=Mat(remap_full);
                     
                     %collapse A by shifting void connections to B and collecting
-                    %be careful of connection multiplicity
+                    %be careful of connection multiplicity i.e. a solid
+                    %element that talks to this voidnum more than once
                     
                     Badd = A(1:remain,remain+1:end);
+                    %                           [ A_keep | Badd ]        [ B_keep ]
+                    %Decompose rearranged A ->  [ toss   | toss ] , B -> [ toss   ]
+                    %we are tossing rows that would correspond to DOFs of the
+                    %current void type.  Since they are constraints, no DOF.
                     [i,~]=find(Badd);
                     if length(i)==length(unique(i)) %there are no multiplicities
-                        B=[sum(Badd,2) B(1:remain,:)]; %essentially or'ing things
+                        B=[sum(Badd,2) B(1:remain,:)]; %essentially or'ing things, 
+                        %only one nz entry per row so colwise sum moves that entry to appropriate spot on col vector
                         mt=1;
                     else
-                        Badd = sort(Badd,2,'descend');  %move all nonzero entries to left
+                        Badd = sort(Badd,2,'descend','ComparisonMethod','abs');  %move all nonzero entries to left
                         [~,j]=find(Badd);
                         mt=max(j);                       %j lists multiplicity
                         B = [Badd(:,1:mt) B(1:remain,:)];
@@ -639,8 +677,8 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             %% Store Geometry
             
             for dir=1:3
-                [Ai,Aj]=find(Acon==dir);  %is find slow here?
-                [Bi,Bj]=find(Bcon==dir);
+                [Ai,Aj]=find(abs(Acon)==dir);  %is find slow here?
+                [Bi,Bj]=find(abs(Bcon)==dir);
                 
                 
                 [A_rows,A_cols,A_lays]=ind2sub(size(Mat),Map(Ai));

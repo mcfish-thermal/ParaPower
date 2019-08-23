@@ -1,5 +1,17 @@
-function ModelInput=FormModel(TestCaseModel)
+function ModelInput=FormModel(TestCaseModel, varargin)
+%Converts PPTCM functional model definition to discrete finite model with
+%supporting metadata.
+%
+% ModelInput=FormModel(TestCaseModel, 'property_1','value_1', 'property_n','value_n')
+%  Name-Value Options:
+%       CulMats=false - do not cultivate (downselect) material library and mat numbers
+%           from source MatLib.  Use to specify legacy behavior where
+%           matnums refer to material placement in master library.
+%       *Pending Implementation - Tolerancing options
+
+
 %disp('============================')
+
 
 %Overall structures orientation/BCs for ease of reference
 Xminus  = 1; %X- Face
@@ -12,6 +24,36 @@ WarnText='';
 
 No_Matl='NoMatl';
 
+ %% Configure Name-Value Options
+FMopts=struct();
+FMopts.CulMats=true;
+
+strleft=@(S,n) S(1:min(n,length(S)));
+
+    if (not(isempty(varargin))) && iscell(varargin{1})
+        PropValPairs=varargin{1};
+    else
+        PropValPairs=varargin;
+    end
+    while ~isempty(PropValPairs) 
+        [Prop, PropValPairs]=Pop(PropValPairs);
+        if ~ischar(Prop)
+            disp(Prop)
+            error('Property name must be a string.');
+        end
+        Pl=length(Prop);
+        %disp(Prop)
+        switch lower(Prop)
+            case strleft('culmats',Pl)
+                [Value, PropValPairs]=Pop(PropValPairs); 
+                FMopts.CulMats=Value;
+            otherwise
+                fprintf('Property "%s" is unknown.\n',Prop)
+        end
+
+    end
+
+    %% Setup
 if ischar(TestCaseModel) 
     if strcmpi('GetDirex',TestCaseModel) %this argument will return the directional index definitions
         ModelInput.Xminus=Xminus;
@@ -98,7 +140,7 @@ end
 Tproc=ExternalConditions.Tproc;
 
 
-%Construct dx, dy, dz
+ %% Construct dx, dy, dz with Tolerancing
 X=[];  %X coordinates, program defined. 
 Y=[];  %Y coordinates, program defined.
 Z=[];  %Z coordinates, program defined.
@@ -215,6 +257,7 @@ OriginPoint=[min(X) min(Y) min(Z)]; %Record minimum absolute coords of X Y and Z
 
 Params.Tsteps=floor(Params.Tsteps);
 
+ %% Assemble Finite Model from Features
 %Create model matrix that will hold material/feature number for each delta coord
 %ModelMatrix=nan*zeros(length(X)-1,length(Y)-1,length(Z)-1);
 ModelMatrix=nan*zeros(length(DeltaCoord.X),length(DeltaCoord.Y),length(DeltaCoord.Z));
@@ -316,7 +359,7 @@ ScaledQ=zeros(size(ModelMatrix));
 %Set elements with neither area nor volume to material type 0
 ModelMatrix(VA==0)=0;
 
-%Apply Q's (Note that Q's are now defined as function handles)
+ %% Apply Q's (Note that Q's are now defined as function handles)
 for Fi=1:length(Features)
     %Define Q for the feature
      %Negate Q so that postive Q is corresponds to heat generation
@@ -410,17 +453,20 @@ for Fi=1:length(Features)
 
 end
 
+ %% Map Materials into ModelMatrix
 FeatureMatrix=ModelMatrix; %Retain the ability to separate features
 ModelMatrix=ModelMatrix*1i;  %Make all feature number imaginary, then replace "imaginary" feature numbers with "real" material numbers.
 
-%Reduce materials to include only those in use in MI
-MatsInUse=zeros(MatLib.NumMat,1);
-for Fi=1:length(Features)
-    MatsInUse=strcmpi(Features(Fi).Matl,MatLib.GetParam('Name')) | MatsInUse;
+if FMopts.CulMats  %Defaults is true
+    %Reduce materials to include only those in use in MI
+    MatsInUse=zeros(MatLib.NumMat,1);
+    for Fi=1:length(Features)
+        MatsInUse=strcmpi(Features(Fi).Matl,MatLib.GetParam('Name')) | MatsInUse;
+    end
+    %MatsInUse=find(MatsInUse);
+    MatLib.DelMatl(find(~MatsInUse));  %Uncomment this line to limit the number of
+    %materials include in MI
 end
-MatsInUse=find(MatsInUse);
-%MatLib=MatLib(MatsInUse);  %Uncomment this line to limit the number of
-%materials include in MI
 
 for Fi=1:length(Features)
     MatNum=find(strcmpi(Features(Fi).Matl,MatLib.GetParam('Name')));
@@ -448,6 +494,7 @@ else
 end
 ModelMatrix(isnan(ModelMatrix))=MatNum;
 
+ %% Assemble Output with Metadata
 %[NR, NC, NL]=size(ModelMatrix);
 if not(isempty(GlobalTime))
     GlobalTime = uniquetol(GlobalTime, 10*eps(max(GlobalTime)));
@@ -479,6 +526,7 @@ ModelInput.GlobalTime=GlobalTime;
 ModelInput.Tinit=Params.Tinit;
 ModelInput.MatLib=MatLib;
 ModelInput.Descriptor=Descriptor;
+ModelInput.Vol_Area_Matrix=VA;
 ModelInput.FeatureVolume=FeatureVolume;
 ModelInput.FeatureMass=FeatureMass;
 ModelInput.WarnText=WarnText;
@@ -491,6 +539,7 @@ end
 
 return
 
+ %% Supporting Functions
 function UseLayer=GetZeroLayer(Coords, FeatureCoords)
     ZeroLayer=find(Coords==FeatureCoords(1),1);
     if isempty(ZeroLayer) %eps trap
@@ -544,3 +593,17 @@ function VA=ComputeVA(DCoord)
 
     %Combine the areas of the zero thickness elements and make them imag.
     VA=VA + (Ax+Ay+Az)*i;
+return
+    
+function [Val, PV]=Pop(PV) 
+    if length(PV)>=1
+        Val=PV{1};
+    else
+        Val={};
+    end
+    if length(PV)>=2
+        PV=PV(2:end);
+    else
+        PV={};
+    end
+return

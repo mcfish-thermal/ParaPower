@@ -2,7 +2,7 @@ classdef PPMat
 %classdef PPMat
 %  Properties
 %     Name - name of the material
-%     Type - material type (neadonly)
+%     Type - material type (readonly)
 %
 %  Methods
 %     ParamList - List parameter of this material (w/o name/type)

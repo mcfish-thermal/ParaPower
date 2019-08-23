@@ -2623,10 +2623,12 @@ function MaxPlot_Callback(hObject, eventdata, handles, Results)
            DoutT=[];
            DoutM=[];
            DoutS=[];
+           %If a feature has been completely overwritten, we should rely on
+           %MI.FeatureDescr, not MI.FeatureMatrix
            Fs=unique(MI.FeatureMatrix(~isnan(MI.FeatureMatrix)));
            Fs=Fs(Fs~=0);
            for Fi=1:length(Fs)
-               Ftext{Fi}=MI.FeatureDescr{Fs(Fi)};
+               Ftext{Fi}=MI.FeatureDescr{Fs(Fi)};  %Fish Proposes Ftext{Fi}=MI.FeatureDescr{Fi};
                Fmask=ismember(MI.FeatureMatrix,Fs(Fi));
                Fmask=repmat(Fmask,1,1,1,length(MI.GlobalTime));
                if ~isempty(Results.getState('thermal'))
