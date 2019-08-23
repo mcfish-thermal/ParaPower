@@ -438,7 +438,6 @@ for Fi=1:length(Features)
          
          %ThisQ(t) contains the function handle from the feature definition
          %ScaledQ(Ei) contains the scalar factor of El.Area/Tot.Area or El.Vol/Tot.Vol
-         
          for Ei=find(reshape(Fmask,1,[]))
              Q{Ei}=@(t)ThisQ(t)*ScaledQ(Ei);
          end
