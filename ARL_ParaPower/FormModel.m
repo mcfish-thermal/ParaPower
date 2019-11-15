@@ -12,10 +12,24 @@ WarnText='';
 
 No_Matl='NoMatl';
 
- %% Configure Name-Value Options
-FMopts=TestCaseModel.FMopts;
+if ischar(TestCaseModel) 
+    if strcmpi('GetDirex',TestCaseModel) %this argument will return the directional index definitions
+        ModelInput.Xminus=Xminus;
+        ModelInput.Xplus=Xplus;
+        ModelInput.Yminus=Yminus;
+        ModelInput.Yplus=Yplus;
+        ModelInput.Zminus=Zminus;
+        ModelInput.Zplus=Zplus;
+        return
+    else
+        error('Invalid optional argument');
+        return
+    end
+else
+    %% Configure Name-Value Options
+    FMopts=TestCaseModel.FMopts;
 
-strleft=@(S,n) S(1:min(n,length(S)));
+    strleft=@(S,n) S(1:min(n,length(S)));
 
     if (not(isempty(varargin))) && iscell(varargin{1})
         PropValPairs=varargin{1};
@@ -39,22 +53,6 @@ strleft=@(S,n) S(1:min(n,length(S)));
         end
 
     end
-
-
-if ischar(TestCaseModel) 
-    if strcmpi('GetDirex',TestCaseModel) %this argument will return the directional index definitions
-        ModelInput.Xminus=Xminus;
-        ModelInput.Xplus=Xplus;
-        ModelInput.Yminus=Yminus;
-        ModelInput.Yplus=Yplus;
-        ModelInput.Zminus=Zminus;
-        ModelInput.Zplus=Zplus;
-        return
-    else
-        error('Invalid optional argument');
-        return
-    end
-else
     if not(isfield(TestCaseModel,'Version') || max(strcmp('Version',properties(TestCaseModel))))
         error(['Incorrect TestCaseModel version.  No version is specified']);
     elseif strcmpi(TestCaseModel.Version,'V2.0')
