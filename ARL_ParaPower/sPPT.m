@@ -81,15 +81,12 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
         %% Common functions
         function setupImpl(obj)
             % Perform model initialization using parameters stored in MI
-            obj.MI.inner_rad=0;
             MI=obj.MI;
             h=MI.h;
             Ta=MI.Ta;
             Mat=MI.Model;
             Q=MI.Q;
             T_init=MI.Tinit;
-            
-            obj.cyl_sol= isfield(MI,'inner_rad') && ~isempty(MI.inner_rad);
 
             rollcall=unique(Mat);
             rollcall=rollcall(rollcall>0); %cant index zero or negative mat numbers
@@ -195,10 +192,12 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                 RHO(meltmask) = rhol(Mat(Map(meltmask))).*PH(meltmask)+rho(Mat(Map(meltmask))).*(1-PH(meltmask));
             end
             
-            if obj.cyl_sol
-                [A,B,Aj.areas,Bj.areas,Aj.hLengths,Bj.hLengths,htcs] = obj.conduct_build_cyl(Aj.adj,Bj.adj,Map,fullheader,K,hint,h,Mat,MI.X,MI.Y,MI.Z,MI.inner_rad);
-            else
+            if MI.FMopts.CS=='rectangular'
                 [A,B,Aj.areas,Bj.areas,Aj.hLengths,Bj.hLengths,htcs] = obj.conduct_build(Aj.adj,Bj.adj,Map,fullheader,K,hint,h,Mat,MI.X,MI.Y,MI.Z);
+            elseif MI.FMopts.CS=='cylindrical'
+                [A,B,Aj.areas,Bj.areas,Aj.hLengths,Bj.hLengths,htcs] = obj.conduct_build_cyl(Aj.adj,Bj.adj,Map,fullheader,K,hint,h,Mat,MI.X,MI.Y,MI.Z,MI.OriginPoint(1));
+            else
+                error('Unknown coordinate system')
             end
             
             if isempty(B)
@@ -320,11 +319,14 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                 delta_t=GlobalTime(2:end)-GlobalTime(1:end-1);
                 % Calculate the capacitance term associated with each node and adjust the 
                 % A matrix (implicit end - future) and C vector (explicit - present) to include the transient effects
-                if obj.cyl_sol
-                    [Cap,vol]=obj.mass_cyl(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat,MI.inner_rad); %units of J/K
-                else
+                if MI.FMopts.CS=='rectangular'
                     [Cap,vol]=obj.mass(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat); %units of J/K
+                elseif MI.FMopts.CS=='cylindrical'
+                    [Cap,vol]=obj.mass_cyl(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat,MI.OriginPoint(1));
+                else
+                    error('Unknown Coordinate System')
                 end
+
                 vol=reshape(vol,size(Mat));
                 Atrans=-spdiags(Cap,0,size(A,1),size(A,2))./delta_t(1);  %Save Transient term for the diagonal of A matrix, units W/K
                 C=-Cap./delta_t(1).*T(:,1); %units of watts
@@ -380,8 +382,13 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                         touched=changing | (Aj.adj*changing)>0;  %find not only those elements changing, but those touched by changing elements
                         
                         %update capacitance (only those changing since internal to element)
-                        Cap(changing)=obj.mass(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat,changing); %units of J/K
-                        
+                        if MI.FMopts.CS=='rectangular'
+                            Cap(changing)=obj.mass(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat,changing); %units of J/K
+                        elseif MI.FMopts.CS=='cylindrical'
+                            Cap(changing)=obj.mass_cyl(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat,MI.OriginPoint(1),changing);
+                        else
+                            error('Unknown Coordinate System')
+                        end
                         %Entire Rebuild, for testing
                         %[A,B,A_areas,B_areas,A_hLengths,B_hLengths,htcs] = conduct_build(Acon,Bcon,newMap,fullheader,K,hint,h,Mat,dx,dy,dz);
                         
@@ -775,8 +782,8 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             B_areas=spalloc(size(Bcon,1),size(Bcon,2),nnz(Bcon));
             B_hLengths=B_areas; %Bcond_out=B_areas;
 
-            abs_rad=[inner_rad cumsum(drow)+inner_rad];  !has one more entry than drow
-            node_rad = (abs_rad(2:end)+abs_rad(1:end-1))/2; !has length(drow)
+            abs_rad=[inner_rad cumsum(drow)+inner_rad];  %has one more entry than drow
+            node_rad = (abs_rad(2:end)+abs_rad(1:end-1))/2; %has length(drow)
             %% Store Geometry
             
             for dir=[-1 1 2 3]
@@ -808,7 +815,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                     case 2      %column-wise connections  - AZIMUTHAL
                         areasA=drow(A_rows').*dlay(A_lays');
                         areasB=drow(B_rows').*dlay(B_lays');
-                        lengthsA=node_rad(A_rows').*dcol(A_cols')/2; !r*theta
+                        lengthsA=node_rad(A_rows').*dcol(A_cols')/2; %r*theta
                         lengthsB=node_rad(B_rows').*dcol(B_cols')/2;
                     case 3      %layer-wise connections  - VERTICAL
                         areasA=node_rad(A_rows').*dcol(A_cols').*drow(A_rows');
@@ -1003,7 +1010,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             end
         end
         
-        function [cap,vol]=mass_cyl(dx,dy,dz,RHO,CP,Mat,Mask,inner_rad)
+        function [cap,vol]=mass_cyl(dx,dy,dz,RHO,CP,Mat,inner_rad,Mask)
             %takes dx, dy, dz of length NC, NR, NL to compute volume vector
             % capacity is computed from vol RHO and CP vectors - length NR*NC*NL
             
@@ -1011,10 +1018,13 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             %and will have length nnz(Mask).  Else, it will be calculated for the
             %entire solid portion of Mat.
             
-            abs_rad=[inner_rad cumsum(dx)+inner_rad];  !has one more entry than drow
-            node_rad = (abs_rad(2:end)+abs_rad(1:end-1))/2; !has length(drow)
+            abs_rad=[inner_rad cumsum(dx)+inner_rad];  %has one more entry than drow
+            %node_rad = (abs_rad(2:end)+abs_rad(1:end-1))/2; %has length(drow)
             
-            vol = reshape(reshape(dx'*(node_rad.*dy),[],1)*dz,[],1);
+            polar_area = abs_rad.^2;
+            polar_area = polar_area(2:end)-polar_area(1:end-1);
+            
+            vol = reshape(reshape(polar_area'*dy,[],1)*dz,[],1);
             if ~exist('Mask','var')
                 cap=RHO.*CP.*vol(Mat>0);
             else

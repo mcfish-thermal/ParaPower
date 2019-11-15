@@ -13,34 +13,6 @@ WarnText='';
 No_Matl='NoMatl';
 
  %% Configure Name-Value Options
-FMopts=TestCaseModel.FMopts;
-
-strleft=@(S,n) S(1:min(n,length(S)));
-
-    if (not(isempty(varargin))) && iscell(varargin{1})
-        PropValPairs=varargin{1};
-    else
-        PropValPairs=varargin;
-    end
-    while ~isempty(PropValPairs) 
-        [Prop, PropValPairs]=Pop(PropValPairs);
-        if ~ischar(Prop)
-            disp(Prop)
-            error('Property name must be a string.');
-        end
-        Pl=length(Prop);
-        %disp(Prop)
-        switch lower(Prop)
-            case strleft('culmats',Pl)
-                [Value, PropValPairs]=Pop(PropValPairs); 
-                FMopts.CulMats=Value;
-            otherwise
-                fprintf('Property "%s" is unknown.\n',Prop)
-        end
-
-    end
-
-
 if ischar(TestCaseModel) 
     if strcmpi('GetDirex',TestCaseModel) %this argument will return the directional index definitions
         ModelInput.Xminus=Xminus;
@@ -79,6 +51,36 @@ else
         Descriptor={};
     end
 end
+ 
+FMopts=TestCaseModel.FMopts;
+
+strleft=@(S,n) S(1:min(n,length(S)));
+
+    if (not(isempty(varargin))) && iscell(varargin{1})
+        PropValPairs=varargin{1};
+    else
+        PropValPairs=varargin;
+    end
+    while ~isempty(PropValPairs) 
+        [Prop, PropValPairs]=Pop(PropValPairs);
+        if ~ischar(Prop)
+            disp(Prop)
+            error('Property name must be a string.');
+        end
+        Pl=length(Prop);
+        %disp(Prop)
+        switch lower(Prop)
+            case strleft('culmats',Pl)
+                [Value, PropValPairs]=Pop(PropValPairs); 
+                FMopts.CulMats=Value;
+            otherwise
+                fprintf('Property "%s" is unknown.\n',Prop)
+        end
+
+    end
+
+
+
 
 %Material Properties
 if isfield(TestCaseModel,'MatLib') || ~isempty(find(strcmpi(properties(TestCaseModel),'MatLib')))
