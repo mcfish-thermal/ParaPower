@@ -12,6 +12,7 @@ classdef PPTCM  %PP Test Case Model
         MatLib            = []
         ParamVar          = {};
         VariableList      = {};
+        Options           = {};
     end
     
     properties (Access = private)
@@ -44,7 +45,7 @@ classdef PPTCM  %PP Test Case Model
                                  'Desc', '' );
     end
     properties (Constant)
-        Version='V3.0'; 
+        Version='V3.1'; 
     end
     
     methods (Static)
