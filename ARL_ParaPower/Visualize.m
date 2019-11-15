@@ -3,7 +3,7 @@ function Visualize (PlotTitle, MI, varargin)
 %Visualize creates a graphic visualization of the model and takes two forms
 %(one for results and one for initial conditions)
 %
-%visualize (PlotTitle, MI, 'propery_1','value_1', 'propery_n','value_n')
+%visualize (PlotTitle, MI, 'property_1','value_1', 'property_n','value_n')
 %
 %   MI is the model information structure provided by FormModel
 %

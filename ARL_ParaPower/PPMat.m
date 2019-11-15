@@ -2,8 +2,8 @@ classdef PPMat
 %classdef PPMat
 %  Properties
 %     Name - name of the material
-%     Type - material type (neadonly)
 %     MaxPlot - Does this material appear in the "MaxPlot" graph
+%     Type - material type (readonly)
 %
 %  Methods
 %     ParamList - List parameter of this material (w/o name/type)

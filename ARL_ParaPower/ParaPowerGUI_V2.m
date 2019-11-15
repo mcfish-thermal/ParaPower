@@ -2645,6 +2645,7 @@ function MaxPlot_Callback(hObject, eventdata, handles, Results)
        if isfield(MI,'FeatureMatrix')
            TestCaseModel = Results.Case;
 
+% <<<<<<< HEAD
            DoutT(:,1)=MI.GlobalTime;
            DoutM(:,1)=MI.GlobalTime;
            DoutS(:,1)=MI.GlobalTime;
@@ -2668,6 +2669,24 @@ function MaxPlot_Callback(hObject, eventdata, handles, Results)
                         DoutS(:,end+1)=max(reshape(Results.getState('stress',Fmask),[],length(MI.GlobalTime)),[],1);
                    end
                    FeatureMat{end+1}=TestCaseModel.Features(Fi).Matl;
+% =======
+%            DoutT=[];
+%            DoutM=[];
+%            DoutS=[];
+%            %If a feature has been completely overwritten, we should rely on
+%            %MI.FeatureDescr, not MI.FeatureMatrix
+%            Fs=unique(MI.FeatureMatrix(~isnan(MI.FeatureMatrix)));
+%            Fs=Fs(Fs~=0);
+%            for Fi=1:length(Fs)
+%                Ftext{Fi}=MI.FeatureDescr{Fs(Fi)};  %Fish Proposes Ftext{Fi}=MI.FeatureDescr{Fi};
+%                Fmask=ismember(MI.FeatureMatrix,Fs(Fi));
+%                Fmask=repmat(Fmask,1,1,1,length(MI.GlobalTime));
+%                if ~isempty(Results.getState('thermal'))
+%                     DoutT(:,1+Fi)=max(reshape(Results.getState('thermal',Fmask),[],length(MI.GlobalTime)),[],1);
+%                end
+%                if ~isempty(Results.getState('MeltFrac'))
+%                     DoutM(:,1+Fi)=max(reshape(Results.getState('meltfrac',Fmask),[],length(MI.GlobalTime)),[],1);
+% >>>>>>> a3d2612b3c7fb41d0581eccdd6328ef23dbd186c
                end
            end
            PCMFeatures=[];
