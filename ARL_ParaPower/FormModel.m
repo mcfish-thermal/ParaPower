@@ -1,4 +1,4 @@
-function ModelInput=FormModel(TestCaseModel)
+function ModelInput=FormModel(TestCaseModel, varargin)
 %disp('============================')
 
 %Overall structures orientation/BCs for ease of reference
@@ -11,6 +11,35 @@ Zplus   = 6; %Z+ Face
 WarnText='';
 
 No_Matl='NoMatl';
+
+ %% Configure Name-Value Options
+FMopts=TestCaseModel.FMopts;
+
+strleft=@(S,n) S(1:min(n,length(S)));
+
+    if (not(isempty(varargin))) && iscell(varargin{1})
+        PropValPairs=varargin{1};
+    else
+        PropValPairs=varargin;
+    end
+    while ~isempty(PropValPairs) 
+        [Prop, PropValPairs]=Pop(PropValPairs);
+        if ~ischar(Prop)
+            disp(Prop)
+            error('Property name must be a string.');
+        end
+        Pl=length(Prop);
+        %disp(Prop)
+        switch lower(Prop)
+            case strleft('culmats',Pl)
+                [Value, PropValPairs]=Pop(PropValPairs); 
+                FMopts.CulMats=Value;
+            otherwise
+                fprintf('Property "%s" is unknown.\n',Prop)
+        end
+
+    end
+
 
 if ischar(TestCaseModel) 
     if strcmpi('GetDirex',TestCaseModel) %this argument will return the directional index definitions
@@ -33,9 +62,12 @@ else
         WarnText=[WarnText Stxt newline];
     elseif strcmpi(TestCaseModel.Version,'V3.0')
         %warning(['Object version of TestCaseModel is under development']);
+    elseif strcmpi(TestCaseModel.Version,'V3.1')
+        warning(['Cylindrical version of TestCaseModel is under development']);
     elseif not(strcmpi(TestCaseModel.Version,'V2.1'))
-        error(['Incorrect TestCaseModel version.  V2.0 required, this data is ' TestCaseModel.Version]);
+        error(['Incorrect TestCaseModel version.  V3.0 required, this data is ' TestCaseModel.Version]);
     end
+    FMopts = TestCaseModel.FMopts;
     ExternalConditions=TestCaseModel.ExternalConditions;
     Features=TestCaseModel.Features;
     Params=TestCaseModel.Params;
@@ -484,6 +516,7 @@ ModelInput.Descriptor=Descriptor;
 ModelInput.FeatureVolume=FeatureVolume;
 ModelInput.FeatureMass=FeatureMass;
 ModelInput.WarnText=WarnText;
+ModelInput.FMopts=FMopts;
 %ModelInput.matprops=MatLib.matprops;
 %ModelInput.matlist=MatLib.matlist;
 ModelInput.Version='V2.0';
@@ -546,3 +579,15 @@ function VA=ComputeVA(DCoord)
 
     %Combine the areas of the zero thickness elements and make them imag.
     VA=VA + (Ax+Ay+Az)*i;
+    
+function [Val, PV]=Pop(PV) 
+    if length(PV)>=1
+        Val=PV{1};
+    else
+        Val={};
+    end
+    if length(PV)>=2
+        PV=PV(2:end);
+    else
+        PV={};
+    end

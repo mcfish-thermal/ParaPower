@@ -1,6 +1,7 @@
 classdef PPTCM  %PP Test Case Model
-    %UNTITLED2 Summary of this class goes here
-    %   Detailed explanation goes here
+    %function obj = PPTCM(ExternalConditions, Features, Params, PottingMaterial, MatLib, Prop1, Val1, Prop2, Val2)
+    %   Prop='CS'      : 'rect', 'cyl' Can only be set during initialization
+    %   Prop='CulMats' : true/false
     
     properties (Access = public)
 %        ExternalConditions {ValidStruct(ExternalConditions,{'h_Xminus'  'h_Xplus'  'h_Yminus'  'h_Xplus'  'h_Zminus'  'h_Zplus' ...
@@ -12,10 +13,10 @@ classdef PPTCM  %PP Test Case Model
         MatLib            = []
         ParamVar          = {};
         VariableList      = {};
-        Options           = {};
     end
     
     properties (Access = private)
+        iFMopts = struct();
         iFeatures = [];
         iParams = [];
         iExternalConditions = [];
@@ -28,6 +29,7 @@ classdef PPTCM  %PP Test Case Model
     end
     
     properties (Dependent)
+        FMopts = struct();
         Features = [];
         Params = [];
         ExternalConditions = [];
@@ -495,7 +497,55 @@ classdef PPTCM  %PP Test Case Model
                 error(ErrText)
             end
         end            
-            
+
+        function FMoptsOut=get.FMopts(obj)
+            FMoptsOut=obj.iFMopts;
+        end
+        
+        function obj=set.FMopts(obj,Input)
+            CSOptions = {'rect' 'cylindrical'};
+            S.CulMats = true;
+            S.CS = 'init';
+            ErrText='';
+            if isstruct(Input(1))
+                Fields = fieldnames(Input(1));
+            else
+                if strcmpi(Input,'Init')
+                    Fields=[];
+                else
+                    Fields={};
+                    ErrText=sprintf('%sFMopts property must be a structure\n',ErrText);
+                end
+            end
+            if isempty(Fields)
+                obj.iFMopts=S;
+            end
+            for Fi=1:length(Fields)
+                if ~any(strcmp(fieldnames(S),Fields(Fi)))
+                    ErrText=sprintf('%s Field %s is not a valid FMopts fieldname\n',ErrText,Fields{Fi});
+                else
+                    if strcmpi(Fields{Fi},'cs') 
+                        ValidVal=find(strncmpi(Input.CS,CSOptions,length(Input.CS)));
+                        
+                        if ~strcmpi(obj.iFMopts.CS,'init')
+                            error(['PPTCM.FMopts.CS cannot be reset once it''s already been set. (' obj.iFMopts.CS ')'])
+                        elseif length(ValidVal)>1
+                            error('Non unique value of FMopts.CS specified.');
+                        elseif isempty(ValidVal)
+                            error(['Only valid values for FMopts.CS are rect, cylindrical not ' Input.CS])
+                        else
+                            obj.iFMopts.CS=CSOptions{ValidVal};
+                        end
+                    else
+                        obj.iFMopts.(Fields{Fi})=Input.(Fields{Fi});
+                    end
+                end
+            end
+            if ~isempty(ErrText)
+                error(ErrText)
+            end
+        end
+        
         function FeaturesOut=get.Features(obj)
             FeaturesOut=obj.iFeatures;
             if isempty(FeaturesOut)
@@ -565,32 +615,56 @@ classdef PPTCM  %PP Test Case Model
 %             end
         end
         
-        function obj = PPTCM(ExternalConditions, Features, Params, PottingMaterial, MatLib)  %Constructor
+        function obj = PPTCM(ExternalConditions, Features, Params, PottingMaterial, MatLib, varargin)  %Constructor
             obj.SymAvail=license('test','symbolic_toolbox');
 
-            if nargin==3
+            obj.ExternalConditions='Init';
+            obj.Features='Init';
+            obj.Params='Init';
+            %obj.PottingMaterial=0;
+            %obj.MatLib=MatLib;
+            obj.FMopts='init';
+            strleft=@(S,n) S(1:min(n,length(S)));
+            if nargin>=3
                 obj.ExternalConditions=ExternalConditions;
                 obj.Features=Features;
                 obj.Params=Params;
-            elseif nargin==4
-                obj.ExternalConditions=ExternalConditions;
-                obj.Features=Features;
-                obj.Params=Params;
+            end
+            if nargin>=4
                 obj.PottingMaterial=PottingMaterial;
-            elseif nargin==5
-                obj.ExternalConditions=ExternalConditions;
-                obj.Features=Features;
-                obj.Params=Params;
-                obj.PottingMaterial=PottingMaterial;
+            end
+            if nargin>=5
                 obj.MatLib=MatLib;
-            elseif nargin==0
-                obj.MatLib=PPMatLib;
-                obj.Params='Init';
-                obj.Features='Init';
-                obj.ExternalConditions='Init';
-    
+            end
+            if (not(isempty(varargin))) && iscell(varargin{1})
+                PropValPairs=varargin{1};
             else
-                error('Invalid number of input argument for initialization of PPModelDef')
+                PropValPairs=varargin;
+            end
+            while ~isempty(PropValPairs) 
+                [Prop, PropValPairs]=Pop(PropValPairs);
+                if ~ischar(Prop)
+                    disp(Prop)
+                    error('PPTCM Property name must be a string.');
+                end
+                Pl=length(Prop);
+                switch lower(Prop)
+                    case strleft('culmats',Pl)
+                        [Value, PropValPairs]=Pop(PropValPairs); 
+                        obj.FMopts.CulMats=Value;
+                    case strleft('cs',Pl)
+                        [Value, PropValPairs]=Pop(PropValPairs); 
+                        if strcmpi(obj.FMopts.CS,'init')
+                            obj.FMopts.CS=Value;
+                        else
+                            error('PPTCM FMopts.CS cannot be changed once set.')
+                        end
+                    otherwise
+                        error('PPTCM Property "%s" is unknown.\n',Prop)
+                end
+            end
+            if strcmpi(obj.FMopts.CS,'init') 
+                obj.FMopts.CS='rect';
             end
         end
         
@@ -784,5 +858,18 @@ function TCMnew=ExpandTCM(TCMinstance, Values, Prop, Iprop, Field, Ifield)
         else
             TCMnew=[TCMnew TCMinstance(Itcm)];
         end
+    end
+end
+
+function [Val, PV]=Pop(PV) 
+    if length(PV)>=1
+        Val=PV{1};
+    else
+        Val={};
+    end
+    if length(PV)>=2
+        PV=PV(2:end);
+    else
+        PV={};
     end
 end
