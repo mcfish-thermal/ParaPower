@@ -41,6 +41,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
         meltable  %logical indicating presence of pcm
         Qv
         delta_t
+        cyl_sol   %T/F flag indicating cylindrical solution
         
         %Element-wise thermal properties
         K
@@ -80,13 +81,15 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
         %% Common functions
         function setupImpl(obj)
             % Perform model initialization using parameters stored in MI
+            obj.MI.inner_rad=0;
             MI=obj.MI;
             h=MI.h;
             Ta=MI.Ta;
             Mat=MI.Model;
             Q=MI.Q;
             T_init=MI.Tinit;
-
+            
+            obj.cyl_sol= isfield(MI,'inner_rad') && ~isempty(MI.inner_rad);
 
             rollcall=unique(Mat);
             rollcall=rollcall(rollcall>0); %cant index zero or negative mat numbers
@@ -191,9 +194,13 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                 CP(meltmask) = sphtl(Mat(Map(meltmask))).*PH(meltmask)+spht(Mat(Map(meltmask))).*(1-PH(meltmask));           %others using rule of mixtures
                 RHO(meltmask) = rhol(Mat(Map(meltmask))).*PH(meltmask)+rho(Mat(Map(meltmask))).*(1-PH(meltmask));
             end
-                
-            [A,B,Aj.areas,Bj.areas,Aj.hLengths,Bj.hLengths,htcs] = obj.conduct_build(Aj.adj,Bj.adj,Map,fullheader,K,hint,h,Mat,MI.X,MI.Y,MI.Z);
-           
+            
+            if obj.cyl_sol
+                [A,B,Aj.areas,Bj.areas,Aj.hLengths,Bj.hLengths,htcs] = obj.conduct_build_cyl(Aj.adj,Bj.adj,Map,fullheader,K,hint,h,Mat,MI.X,MI.Y,MI.Z,MI.inner_rad);
+            else
+                [A,B,Aj.areas,Bj.areas,Aj.hLengths,Bj.hLengths,htcs] = obj.conduct_build(Aj.adj,Bj.adj,Map,fullheader,K,hint,h,Mat,MI.X,MI.Y,MI.Z);
+            end
+            
             if isempty(B)
                 B=spalloc(size(C,1),size(C,2),0);
                 fullheader=1;
@@ -313,7 +320,11 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                 delta_t=GlobalTime(2:end)-GlobalTime(1:end-1);
                 % Calculate the capacitance term associated with each node and adjust the 
                 % A matrix (implicit end - future) and C vector (explicit - present) to include the transient effects
-                [Cap,vol]=obj.mass(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat); %units of J/K
+                if obj.cyl_sol
+                    [Cap,vol]=obj.mass_cyl(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat,MI.inner_rad); %units of J/K
+                else
+                    [Cap,vol]=obj.mass(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat); %units of J/K
+                end
                 vol=reshape(vol,size(Mat));
                 Atrans=-spdiags(Cap,0,size(A,1),size(A,2))./delta_t(1);  %Save Transient term for the diagonal of A matrix, units W/K
                 C=-Cap./delta_t(1).*T(:,1); %units of watts
@@ -391,10 +402,12 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                 obj=post_step_hook(obj);
             end
             
+            if ~isnan(delta_t)
             res_sum_l2=sum((pre_m_res-post_m_res).^2,1);
             res_sum_l1=sum(abs(pre_m_res-post_m_res),1);
             vol_res_l1=sum(abs(pre_m_res-post_m_res).*vol(Map),1);
             %figure; plot(GlobalTime(2:end),vol_res_l1)
+            end
             
             Tres=zeros(numel(Mat),size(T,2)-1); % Nodal temperature results
             PHres=Tres;
@@ -733,6 +746,108 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             Acond=Acond-spdiags(sum([Acond Bcond],2),0,size(Acon,1),size(Acon,2));
         end
         
+        function [Acond,Bcond,A_areas,B_areas,A_hLengths,B_hLengths,htcs] = conduct_build_cyl(Acon,Bcon,Map,header,K,hint,h,Mat,drow,dcol,dlay,inner_rad)
+            %Builds Conductance Matrices using connectivity matrices, dimensional info,
+            %and material properties/convection coefficients.  Assumes
+            %X->r, Y->theta, Z->Z
+            
+            % !!!! TO FIX:  location inputs are element distances, we don't
+            % !!!! know where the r=0 axis is located.  Also theta... assume
+            % !!!! degrees?
+            
+            %Acon and Bcon connectivity is coded as 0,1,2,3 where 0 is no connection,
+            % 1 is connection row-wise, 2 is connection col-wise, 3 is conn layer-wise
+            % such that drow                dcol                      dlay
+            % are the length dimensions of these connections
+            %
+            %Want to build a A-matrix with dimensional info.  One will contain areas
+            %for flux computation. Symmetric.  The other will have half length info,
+            %with coefficient ij holding the half length from center of element i to
+            %boundary of element j.
+            
+            %Elemental conductivities will be multiplied into these and harmonic
+            %summed.
+            
+            %% Initialize
+            A_areas=spalloc(size(Acon,1),size(Acon,2),nnz(Acon));
+            A_hLengths=A_areas; %Acond=A_areas;
+            
+            B_areas=spalloc(size(Bcon,1),size(Bcon,2),nnz(Bcon));
+            B_hLengths=B_areas; %Bcond_out=B_areas;
+
+            abs_rad=[inner_rad cumsum(drow)+inner_rad];  !has one more entry than drow
+            node_rad = (abs_rad(2:end)+abs_rad(1:end-1))/2; !has length(drow)
+            %% Store Geometry
+            
+            for dir=[-1 1 2 3]
+                if abs(dir)==1
+                    [Ai,Aj]=find(Acon==dir);  %is find slow here?
+                    [Bi,Bj]=find(Bcon==dir);
+
+                    [A_rows,A_cols,A_lays]=ind2sub(size(Mat),Map(Ai));
+                    [B_rows,B_cols,B_lays]=ind2sub(size(Mat),Map(Bi));
+                else
+                    [Ai,Aj]=find(abs(Acon)==dir);  %is find slow here?
+                    [Bi,Bj]=find(abs(Bcon)==dir);
+
+                    [A_rows,A_cols,A_lays]=ind2sub(size(Mat),Map(Ai));
+                    [B_rows,B_cols,B_lays]=ind2sub(size(Mat),Map(Bi));
+                end
+                
+                switch dir
+                    case -1
+                        areasA=abs_rad(A_rows').*dcol(A_cols').*dlay(A_lays');  % !!! WE ARE BREAKING SYMMETRY HERE
+                        areasB=abs_rad(B_rows').*dcol(B_cols').*dlay(B_lays');
+                        lengthsA=drow(A_rows')/2;
+                        lengthsB=drow(B_rows')/2;
+                    case 1      %row-wise connections  - RADIAL                       
+                        areasA=abs_rad((A_rows+1)').*dcol(A_cols').*dlay(A_lays');  % !!! WE ARE BREAKING SYMMETRY HERE
+                        areasB=abs_rad((B_rows+1)').*dcol(B_cols').*dlay(B_lays');
+                        lengthsA=drow(A_rows')/2;
+                        lengthsB=drow(B_rows')/2;
+                    case 2      %column-wise connections  - AZIMUTHAL
+                        areasA=drow(A_rows').*dlay(A_lays');
+                        areasB=drow(B_rows').*dlay(B_lays');
+                        lengthsA=node_rad(A_rows').*dcol(A_cols')/2; !r*theta
+                        lengthsB=node_rad(B_rows').*dcol(B_cols')/2;
+                    case 3      %layer-wise connections  - VERTICAL
+                        areasA=node_rad(A_rows').*dcol(A_cols').*drow(A_rows');
+                        areasB=node_rad(B_rows').*dcol(B_cols').*drow(B_rows');
+                        lengthsA=dlay(A_lays')/2;
+                        lengthsB=dlay(B_lays')/2;
+                end
+                
+                A_areas=A_areas+sparse(Ai,Aj,areasA,size(Acon,1),size(Acon,2));
+                A_hLengths=A_hLengths+sparse(Ai,Aj,lengthsA,size(Acon,1),size(Acon,2));
+                
+                B_areas=B_areas+sparse(Bi,Bj,areasB,size(Bcon,1),size(Bcon,2));
+                B_hLengths=B_hLengths+sparse(Bi,Bj,lengthsB,size(Bcon,1),size(Bcon,2));
+            end
+            
+            
+            %% Incorporate Conductivities
+            
+            recip=@(x) 1./x;  %anonymous function handle
+            Acond=A_areas.* spfun(recip,A_hLengths);
+            Acond=spdiags(K,0,size(Acon,1),size(Acon,2))*Acond;  %conductance from center of element i up to bdry of element j
+            Acond=spfun(recip, (spfun(recip,Acond) + spfun(recip,Acond')) );
+            
+            
+%             if ~issymmetric(Acond)
+%                 error('Symmetry Error!')
+%             end
+            
+            Bcond_out=B_areas.* spfun(recip,B_hLengths);
+            Bcond_out=spdiags(K,0,size(Acon,1),size(Acon,2))*sparse(Bcond_out);  %conductance from center of element i up to bdry of convection
+            htcs=[hint(-header(header<0)) h(header(header>0))];  %build htcs from header and h lists
+            Bcond_in = sparse(B_areas*diag(htcs));
+            Bcond = spfun(recip, (spfun(recip,Bcond_out) + spfun(recip,Bcond_in)) );
+            
+            %the diagonal of the A conductance matrix holds the center of the central
+            %differences.  These must balance cntr=sum([Acond Bcond],2);
+            Acond=Acond-spdiags(sum([Acond Bcond],2),0,size(Acon,1),size(Acon,2));
+        end
+        
         function [Acond,Bcond,htcs] = conduct_update(Acond,Bcond,A_areas,B_areas,A_hLengths,B_hLengths,htcs,K,Mask)
             %Updates Conductance Matrices using connectivity matrices, dimensional info,
             %and material properties/convection coefficients.
@@ -745,7 +860,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             
             
             if ~issymmetric(Acond)
-                error('Symmetry Error!')
+                warning('Symmetry Error!')
             end
             
             Bcond_out=sparse(B_areas(Mask,:)).*spfun(recip,sparse(B_hLengths(Mask,:)));
@@ -879,6 +994,27 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             %entire solid portion of Mat.
             
             vol = reshape(reshape(dx'*dy,[],1)*dz,[],1);
+            if ~exist('Mask','var')
+                cap=RHO.*CP.*vol(Mat>0);
+            else
+                solid_vol=vol(Mat>0);
+                cap=RHO(Mask).*CP(Mask).*solid_vol(Mask);
+                %make sure your target output variable is also masked!
+            end
+        end
+        
+        function [cap,vol]=mass_cyl(dx,dy,dz,RHO,CP,Mat,Mask,inner_rad)
+            %takes dx, dy, dz of length NC, NR, NL to compute volume vector
+            % capacity is computed from vol RHO and CP vectors - length NR*NC*NL
+            
+            %if a Mask is input, cap will be calculated for only those masked elements,
+            %and will have length nnz(Mask).  Else, it will be calculated for the
+            %entire solid portion of Mat.
+            
+            abs_rad=[inner_rad cumsum(dx)+inner_rad];  !has one more entry than drow
+            node_rad = (abs_rad(2:end)+abs_rad(1:end-1))/2; !has length(drow)
+            
+            vol = reshape(reshape(dx'*(node_rad.*dy),[],1)*dz,[],1);
             if ~exist('Mask','var')
                 cap=RHO.*CP.*vol(Mat>0);
             else
