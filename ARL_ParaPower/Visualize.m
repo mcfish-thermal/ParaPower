@@ -344,7 +344,7 @@ function Visualize (PlotTitle, MI, varargin)
     hold on
     %drawnow nocallbacks limitrate
     if strcmpi(MI.FMopts.CS,'cylindrical')
-        XvertCS=@(In)[In(1)*dcos(In(2)) In(1)*dsin(In(2)) In(3)];
+        XvertCS=@(In)[In(1)*cos(In(2)) In(1)*sin(In(2)) In(3)];
     else
         XvertCS=@(In)In;
     end
@@ -504,7 +504,8 @@ function Visualize (PlotTitle, MI, varargin)
                             else
                                 ThisQ=char(ThisQ);
                             end
-                            F=patch('faces',ThisFace,'vertices',VList{ThisMat},'facecolor','none');
+                            %Adding Q outlines
+                            F=patch('faces',ThisFace,'vertices',VList{ThisMat},'facecolor','none'); 
                             QFList{ThisMat} = [QFList{ThisMat} F];
                             if isKey(QList,ThisQ)
                                 QList(ThisQ)=[QList(ThisQ) F];

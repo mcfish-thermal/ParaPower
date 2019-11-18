@@ -9,6 +9,7 @@ Yplus  = 4; %Y+ Face
 Zminus= 5; %Z- Face
 Zplus   = 6; %Z+ Face
 WarnText='';
+one_turn=2*pi;
 
 No_Matl='NoMatl';
 
@@ -199,12 +200,12 @@ for i=1:length(Features)
     
     %Ensure that Y (if cylindrical) doesn't exceet 360 or -360
     if strcmpi(FMopts.CS,'cylindrical')
-        if max(Features(i).y) > 360
+        if max(Features(i).y) > one_turn
             warning('For cylindrical CS, Y values must be <= 360.  Offending coordinate has been modified. Feature(%d): %s', i, Features(i).Desc)
         end
-        Keep360=Features(i).y==360;  %Find feature that are labeled 360 deg
-        Features(i).y=mod(Features(i).y, 360); %Ensure all value are < 360
-        Features(i).y(Keep360)=360; %Put 360 back into features coords
+        Keep360=Features(i).y==one_turn;  %Find feature that are labeled 360 deg
+        Features(i).y=mod(Features(i).y, one_turn); %Ensure all value are < 360
+        Features(i).y(Keep360)=one_turn; %Put 360 back into features coords
         ThetaStartEnd=[min(ThetaStartEnd(1),Features(i).y(1)),max(ThetaStartEnd(2),Features(i).y(2))];
     else
         Features(i).y=sort(Features(i).y);  %Don't sort Y, if cylindrical (cause it's theta)
@@ -308,8 +309,8 @@ Z = sort([Z0 Zu Z(~ismembertol(Z,Zu,Toler))]);  %combines, 0 thickness + user de
 DeltaCoord.X=X(2:end)-X(1:end-1);
 DeltaCoord.Y=Y(2:end)-Y(1:end-1);
 DeltaCoord.Z=Z(2:end)-Z(1:end-1);
-
 OriginPoint=[min(X) min(Y) min(Z)]; %Record minimum absolute coords of X Y and Z
+DeltaCoord.OriginPoint = OriginPoint;
 
 Params.Tsteps=floor(Params.Tsteps);
 
@@ -408,7 +409,11 @@ for Fii=1:length(ZeroThickness)
 end
 
 %Compute volume (real) and area (imaginary) of model
-VA=ComputeVA(DeltaCoord);
+if strcmpi(FMopts.CS,'cylindrical')
+    VA=ComputeVA_cyl(DeltaCoord);
+else
+    VA=ComputeVA(DeltaCoord);
+end
 ScaledQ=zeros(size(ModelMatrix));
 
 %Set elements with neither area nor volume to material type 0
@@ -644,6 +649,38 @@ function VA=ComputeVA(DCoord)
     Az=reshape(reshape(DCoord.X' * DCoord.Y,[],1) * Zz,Lx, Ly,[]);
     Ay=reshape(reshape(DCoord.X' * Yz,[],1) * DCoord.Z,Lx, Ly,[]);
     Ax=reshape(reshape(Xz' * DCoord.Y,[],1) * DCoord.Z,Lx, Ly,[]);
+
+    %Combine the areas of the zero thickness elements and make them imag.
+    VA=VA + (Ax+Ay+Az)*i;
+    
+function VA=ComputeVA_cyl(DCoord)
+%Compute the volume and area of the model elements.  Volumes are R, areas are i
+
+    %Get length of each coordinate
+    Lx=length(DCoord.X);
+    Ly=length(DCoord.Y);
+    Lz=length(DCoord.Z);
+    
+    %Matrix multiply Nx1(x) * 1xN(y), then reshape and Nx1(xy) * 1xN(z) then reshape into nxmxo 
+    %VA=reshape(reshape(DCoord.X' * DCoord.Y,[],1) * DCoord.Z,Lx, Ly,[]);
+    inner_rad=DCoord.OriginPoint(1);
+    abs_rad=[inner_rad cumsum(DCoord.X)+inner_rad];  %radii in absolute coordinates - has length Lx+1
+    abs_rad_short=abs_rad(2:end);
+    
+    polar_area = abs_rad.^2;
+    polar_area = polar_area(2:end)-polar_area(1:end-1);  %vector of r_outer^2-r_inner^2
+            
+    VA = reshape(reshape(polar_area'*DCoord.Y,[],1)*DCoord.Z,Lx, Ly,[]);
+    
+    %Construct vector that is 0's for all non-zero elements and 1 for all Zeros
+    Xz=(DCoord.X==0);
+    Yz=(DCoord.Y==0);
+    Zz=(DCoord.Z==0);
+
+    %Compute (sequentially) Areas for zero thickness X, then Y, then Z
+    Az=reshape(reshape(polar_area' * DCoord.Y,[],1) * Zz,Lx, Ly,[]); %pizza slices
+    Ay=reshape(reshape(DCoord.X' * Yz,[],1) * DCoord.Z,Lx, Ly,[]);  %rectangles
+    Ax=reshape(reshape((abs_rad_short.*Xz)' * DCoord.Y,[],1) * DCoord.Z,Lx, Ly,[]);  %cylindrical shells
 
     %Combine the areas of the zero thickness elements and make them imag.
     VA=VA + (Ax+Ay+Az)*i;

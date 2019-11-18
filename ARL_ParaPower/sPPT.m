@@ -41,8 +41,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
         meltable  %logical indicating presence of pcm
         Qv
         delta_t
-        cyl_sol   %T/F flag indicating cylindrical solution
-        
+                
         %Element-wise thermal properties
         K
         CP
