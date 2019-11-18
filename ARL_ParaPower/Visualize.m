@@ -33,7 +33,23 @@ function Visualize (PlotTitle, MI, varargin)
 %  Z cross section
 %  Vectorize
 
-    
+    %Ensure FMopts exists with the correct fields
+    TmpP=PPTCM;
+    if ~isfield(MI,'FMopts')
+        MI.FMopts=TmpP.FMopts;
+        disp('Creating FMopts field with default values')
+    else
+        for ThisField=reshape(fields(TmpP.FMopts),1,[])
+            if ~isfield(MI.FMopts,ThisField{:})
+                MI.FMopts=setfield(MI.FMopts,ThisField{:},getfield(TmpP.FMopts,ThisField{:}));
+                disp(['Applying default value to FMopt.' ThisField{:}])
+            end
+        end
+    end
+
+    dsin=@(d)sin(d*pi/180);
+    dcos=@(d)cos(d*pi/180);
+
     DeltaCoord=  {MI.X MI.Y MI.Z};
     ModelMatrix=MI.Model;
 	
@@ -327,6 +343,11 @@ function Visualize (PlotTitle, MI, varargin)
 
     hold on
     %drawnow nocallbacks limitrate
+    if strcmpi(MI.FMopts.CS,'cylindrical')
+        XvertCS=@(In)[In(1)*dcos(In(2)) In(1)*dsin(In(2)) In(3)];
+    else
+        XvertCS=@(In)In;
+    end
     for Xi=1:length(X)-1
         for Yi=1:length(Y)-1
             for Zi=1:length(Z)-1
@@ -348,14 +369,16 @@ function Visualize (PlotTitle, MI, varargin)
                     else
                         FaceAlpha=PlotParms.Transparency;
                     end
-                    P(1,:)=[X(Xi)   Y(Yi)   Z(Zi)  ] + [  Xoffset  Yoffset  Zoffset] ;
-                    P(2,:)=[X(Xi)   Y(Yi+1) Z(Zi)  ] + [  Xoffset -Yoffset  Zoffset] ; 
-                    P(3,:)=[X(Xi+1) Y(Yi+1) Z(Zi)  ] + [ -Xoffset -Yoffset  Zoffset] ;
-                    P(4,:)=[X(Xi+1) Y(Yi)   Z(Zi)  ] + [ -Xoffset  Yoffset  Zoffset] ;
-                    P(5,:)=[X(Xi)   Y(Yi)   Z(Zi+1)] + [  Xoffset  Yoffset -Zoffset] ;
-                    P(6,:)=[X(Xi)   Y(Yi+1) Z(Zi+1)] + [  Xoffset -Yoffset -Zoffset] ;
-                    P(7,:)=[X(Xi+1) Y(Yi+1) Z(Zi+1)] + [ -Xoffset -Yoffset -Zoffset] ;
-                    P(8,:)=[X(Xi+1) Y(Yi)   Z(Zi+1)] + [ -Xoffset  Yoffset -Zoffset] ;
+                    
+                    P(1,:)=XvertCS([X(Xi)   Y(Yi)   Z(Zi)  ] + [  Xoffset  Yoffset  Zoffset]) ;
+                    P(2,:)=XvertCS([X(Xi)   Y(Yi+1) Z(Zi)  ] + [  Xoffset -Yoffset  Zoffset]) ; 
+                    P(3,:)=XvertCS([X(Xi+1) Y(Yi+1) Z(Zi)  ] + [ -Xoffset -Yoffset  Zoffset]) ;
+                    P(4,:)=XvertCS([X(Xi+1) Y(Yi)   Z(Zi)  ] + [ -Xoffset  Yoffset  Zoffset]) ;
+                    P(5,:)=XvertCS([X(Xi)   Y(Yi)   Z(Zi+1)] + [  Xoffset  Yoffset -Zoffset]) ;
+                    P(6,:)=XvertCS([X(Xi)   Y(Yi+1) Z(Zi+1)] + [  Xoffset -Yoffset -Zoffset]) ;
+                    P(7,:)=XvertCS([X(Xi+1) Y(Yi+1) Z(Zi+1)] + [ -Xoffset -Yoffset -Zoffset]) ;
+                    P(8,:)=XvertCS([X(Xi+1) Y(Yi)   Z(Zi+1)] + [ -Xoffset  Yoffset -Zoffset]) ;
+                    
                     Face(1,:)=[1 2 3 4]; %Z-
                     Face(2,:)=[1 5 6 2]; %X-
                     Face(3,:)=[1 4 8 5]; %Y-
@@ -594,7 +617,7 @@ function Visualize (PlotTitle, MI, varargin)
     set(gca,'visi','on')
     %Display axes in green.
     if PlotParms.PlotAxes
-        Xmax=max(max([X Y Z])-min([X Y Z]))*1.1;
+        Xmax=max(max(XvertCS([X Y Z]))-min(XvertCS([X Y Z])))*1.1;
         Ymax=Xmax;
         Zmax=Xmax; %max(Z)*1.1;
         L(1)=line([min(X) Xmax], [1 1]*min(Y) , [1 1]*min(Z));
