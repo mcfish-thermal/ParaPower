@@ -567,6 +567,21 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             padmap=[h1*(nodes+1); [h3*(nodes+3) Map h4*(nodes+4)]; h2*(nodes+2)];
             padmap=cat(3,h5*(nodes+5),padmap,h6*(nodes+6));  %extended array containing Mat that allows for indexing
             
+            if isnan(h(1)) && isnan(h(2))       %flag to periodize X direction
+                padmap(1,2:end-1,2:end-1)=padmap(end-1,2:end-1,2:end-1);
+                padmap(end,2:end-1,2:end-1)=padmap(2,2:end-1,2:end-1);
+            end
+            
+            if isnan(h(3)) && isnan(h(4))       %flag to periodize Y direction
+                padmap(2:end-1,1,2:end-1)=padmap(2:end-1,end-1,2:end-1);
+                padmap(2:end-1,end,2:end-1)=padmap(2:end-1,2,2:end-1);
+            end
+            
+            if isnan(h(5)) && isnan(h(6))       %flag to periodize Z direction
+                padmap(2:end-1,2:end-1,1)=padmap(2:end-1,2:end-1,end-1);
+                padmap(2:end-1,2:end-1,end)=padmap(2:end-1,2:end-1,2); 
+            end
+                       
             %Build expanded connectivity map
             rowup=padmap(3:end,2:end-1,2:end-1);        %Row-wise map of columns of [A B] that need to be 1
             rowdown=padmap(1:end-2,2:end-1,2:end-1);    %The ith element (linear indexing) of these vectors
@@ -584,6 +599,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
 
             A=Full(:,1:numel(Mat));
             Bexp=Full(:,numel(Mat)+1:end);
+            h(isnan(h))=0; %forget NaN h-boundaries
             B(:,:)=Bexp(:,h~=0);
             
             if ~issymmetric(A,'skew')
@@ -663,6 +679,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                 Mat=Mat(remap);
             end
             
+            h(isnan(h))=0;  %set NaN external boundaries to zero so they are forgotten
             fullheader=[header find(h)]; %fullheader is a rowvector of negative matnums and a subset of 1 thru 6
             Ta_vec=Ta_void(-(header));
             Ta_vec=[Ta_vec Ta(h~=0)];  %grab just those Ta corresponding to the active ext boundaries
