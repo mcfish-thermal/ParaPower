@@ -27,6 +27,35 @@ if ischar(TestCaseModel)
         return
     end
 else
+    %% Configure Name-Value Options
+    FMopts=TestCaseModel.FMopts;
+
+    strleft=@(S,n) S(1:min(n,length(S)));
+
+    if (not(isempty(varargin))) && iscell(varargin{1})
+        PropValPairs=varargin{1};
+    else
+        PropValPairs=varargin;
+    end
+    while ~isempty(PropValPairs) 
+        [Prop, PropValPairs]=Pop(PropValPairs);
+        if ~ischar(Prop)
+            disp(Prop)
+            error('Property name must be a string.');
+        end
+        Pl=length(Prop);
+        %disp(Prop)
+        switch lower(Prop)
+            case strleft('culmats',Pl)
+                [Value, PropValPairs]=Pop(PropValPairs); 
+                FMopts.CulMats=Value;
+            case strleft('CS',Pl)
+                [Value, PropValPairs]=Pop(PropValPairs);
+                warning('Coordinate system can only be changed when PPTCM is initialized.')
+            otherwise
+                fprintf('Property "%s" is unknown.\n',Prop)
+        end
+    end
     if not(isfield(TestCaseModel,'Version') || max(strcmp('Version',properties(TestCaseModel))))
         error(['Incorrect TestCaseModel version.  No version is specified']);
     elseif strcmpi(TestCaseModel.Version,'V2.0')
@@ -35,7 +64,7 @@ else
     elseif strcmpi(TestCaseModel.Version,'V3.0')
         %warning(['Object version of TestCaseModel is under development']);
     elseif strcmpi(TestCaseModel.Version,'V3.1')
-        warning(['Cylindrical version of TestCaseModel is under development']);
+        warning(['Cylindrical version of TestCaseModel is under development.  Need to fix parsing of init options to parse varargout']);
     elseif not(strcmpi(TestCaseModel.Version,'V2.1'))
         error(['Incorrect TestCaseModel version.  V3.0 required, this data is ' TestCaseModel.Version]);
     end
@@ -147,6 +176,7 @@ Zu=[]; %Z coordinates, user defined.
 %direction. Build up X, Y, Z list of coordinates and X0, Y0, Z0 which is
 %the special list that covers zero thickness features and user defined locations.
 MinFeatureSize=[1 1 1]*inf;
+ThetaStartEnd=[inf -inf];
 for i=1:length(Features)
 %    warning(Features(i).Desc) %MSB
     Fd=Features(i).x;
@@ -167,8 +197,20 @@ for i=1:length(Features)
     end
     Features(i).z=Fd;
     
+    %Ensure that Y (if cylindrical) doesn't exceet 360 or -360
+    if strcmpi(FMopts.CS,'cylindrical')
+        if max(Features(i).y) > 360
+            warning('For cylindrical CS, Y values must be <= 360.  Offending coordinate has been modified. Feature(%d): %s', i, Features(i).Desc)
+        end
+        Keep360=Features(i).y==360;  %Find feature that are labeled 360 deg
+        Features(i).y=mod(Features(i).y, 360); %Ensure all value are < 360
+        Features(i).y(Keep360)=360; %Put 360 back into features coords
+        ThetaStartEnd=[min(ThetaStartEnd(1),Features(i).y(1)),max(ThetaStartEnd(2),Features(i).y(2))];
+    else
+        Features(i).y=sort(Features(i).y);  %Don't sort Y, if cylindrical (cause it's theta)
+    end
+    
     Features(i).x=sort(Features(i).x);
-    Features(i).y=sort(Features(i).y);
     Features(i).z=sort(Features(i).z);
 
     %Store X coord values in X0 (user defined values) and X (Prog/division defined coords)
@@ -205,6 +247,27 @@ for i=1:length(Features)
         MinFeatureSize(3)=min(MinFeatureSize(3),min(Coords(2:end)-Coords(1:end-1)));
     else
         Z0=[Z0 Coords(1)];
+    end
+end
+
+if strcmpi(FMopts.CS,'cylindrical')
+    if ThetaStartEnd(1)==ThetaStartEnd(2)
+        Etxt='';
+        if not(isnan(h(Yminus)))
+            Etxt=[Etxt 'h(Y-) '];
+        end
+        if not(isnan(h(Yplus)))
+            Etxt=[Etxt 'h(Y-) '];
+        end
+        if not(isnan(Ta(Yminus)))
+            Etxt=[Etxt 'Ta(Y-) '];
+        end
+        if not(isnan(Ta(Yplus)))
+            Etxt=[Etxt 'Ta(Y-) '];
+        end
+        if ~isempty(Etxt)
+            error('For fully defined circular structure, The following BCs must be NaN: %s',Etxt)
+        end
     end
 end
 
@@ -500,6 +563,9 @@ for Fi=1:length(Fs)
     end
 end
 
+if strcmpi(FMopts.CS,'cylindrical') %If cylindrical origin point may not necessarily be lowest value
+    OriginPoint(2)=ThetaStartEnd(1);  
+end
 ModelInput.OriginPoint=OriginPoint; %Minimum absolute coordinates for X, Y and Z
 ModelInput.h=h;
 ModelInput.Ta=Ta;

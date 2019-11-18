@@ -267,6 +267,8 @@ classdef PPTCM  %PP Test Case Model
                     ThisPropVal=TCMmaster.(ThisPropName);
                     if iscell(ThisPropVal)
                         error('Cell valued properties are not yet addressed.')
+                    elseif strcmpi(ThisPropName,'FMopts')
+                        
                     elseif isstruct(ThisPropVal)
                         for Ipe=1:length(ThisPropVal)   %go through each element when a property is an array
                             ThisPropValElement=ThisPropVal(Ipe);
