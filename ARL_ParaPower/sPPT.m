@@ -191,7 +191,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                 RHO(meltmask) = rhol(Mat(Map(meltmask))).*PH(meltmask)+rho(Mat(Map(meltmask))).*(1-PH(meltmask));
             end
             
-            if MI.FMopts.CS=='rectangular'
+            if MI.FMopts.CS=='rect'
                 [A,B,Aj.areas,Bj.areas,Aj.hLengths,Bj.hLengths,htcs] = obj.conduct_build(Aj.adj,Bj.adj,Map,fullheader,K,hint,h,Mat,MI.X,MI.Y,MI.Z);
             elseif MI.FMopts.CS=='cylindrical'
                 [A,B,Aj.areas,Bj.areas,Aj.hLengths,Bj.hLengths,htcs] = obj.conduct_build_cyl(Aj.adj,Bj.adj,Map,fullheader,K,hint,h,Mat,MI.X,MI.Y,MI.Z,MI.OriginPoint(1));
@@ -318,7 +318,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                 delta_t=GlobalTime(2:end)-GlobalTime(1:end-1);
                 % Calculate the capacitance term associated with each node and adjust the 
                 % A matrix (implicit end - future) and C vector (explicit - present) to include the transient effects
-                if MI.FMopts.CS=='rectangular'
+                if MI.FMopts.CS=='rect'
                     [Cap,vol]=obj.mass(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat); %units of J/K
                 elseif MI.FMopts.CS=='cylindrical'
                     [Cap,vol]=obj.mass_cyl(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat,MI.OriginPoint(1));
@@ -381,7 +381,7 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                         touched=changing | (Aj.adj*changing)>0;  %find not only those elements changing, but those touched by changing elements
                         
                         %update capacitance (only those changing since internal to element)
-                        if MI.FMopts.CS=='rectangular'
+                        if MI.FMopts.CS=='rect'
                             Cap(changing)=obj.mass(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat,changing); %units of J/K
                         elseif MI.FMopts.CS=='cylindrical'
                             Cap(changing)=obj.mass_cyl(MI.X,MI.Y,MI.Z,obj.RHO,obj.CP,Mat,MI.OriginPoint(1),changing);
@@ -856,9 +856,9 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
             Acond=spfun(recip, (spfun(recip,Acond) + spfun(recip,Acond')) );
             
             
-%             if ~issymmetric(Acond)
-%                 error('Symmetry Error!')
-%             end
+             if ~issymmetric(Acond)
+                 error('Symmetry Error!')
+             end
             
             Bcond_out=B_areas.* spfun(recip,B_hLengths);
             Bcond_out=spdiags(K,0,size(Acon,1),size(Acon,2))*sparse(Bcond_out);  %conductance from center of element i up to bdry of convection

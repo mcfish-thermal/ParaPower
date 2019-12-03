@@ -11,8 +11,9 @@ classdef PPTCM  %PP Test Case Model
 %        Params {ValidStruct(Params, {'Tinit' 'DeltaT' 'Tsteps'})}
         PottingMaterial   = '0';
         MatLib            = []
-        ParamVar          = {};
-        VariableList      = {};
+        ParamVar          = {};  %values of parameters for a generated case...this should be protected from external set access
+        %on a processed master TCM (expanded=false) these params will contain arrays in {:,2}
+        VariableList      = {};  %User named parameters
     end
     
     properties (Access = private)
@@ -161,11 +162,13 @@ classdef PPTCM  %PP Test Case Model
             end
         end
         
-        function TCMout = GenerateCases (obj, VariableList)
+        function [TCMout,TCMmaster] = GenerateCases (obj, VariableList)
         %TCMout=GenerateTCM(VariableList)
         %Generates Scalar TestCaseModels using substitutions in VariableList
         %Variable list is a structure array. VariableList{:,1}=name and
         %              VariableList{:,2}=value
+        
+            %% Error Checking and Initialization
             if ~obj.SymAvail
                 disp('WARNING: Symbolic toolbox is not available, Function based Q definitions limited to preclude use of any parameters.')
             end
@@ -181,11 +184,9 @@ classdef PPTCM  %PP Test Case Model
                 error('TestVar is a reserved variable name for this subroutine and cannot be use externally')
             end
             [ScalarParamList, VectorParamList]=SeparateScalarVector(VariableList);
-
-            if ~isempty(ErrText)
-                error(ErrText)
+            if isempty(obj.MatLib)
+                error('Missing material library, cannot generate cases')
             end
-            
             %Evaluate and error check the scalar parameter list
             if ~isempty(ScalarParamList)
                 for Row=1:length(ScalarParamList(:,1))
@@ -194,34 +195,120 @@ classdef PPTCM  %PP Test Case Model
                     end
                 end
             end
+                     
+            if ~isempty(ErrText)
+                error(ErrText)
+            end
             
+            %% Build Permutations
+            %steps to undertake:
+            %inventory materials used, including cell arrayed prmtzn of
+                %mats over features
+            %restrict parametric matprop definitions to only materials
+                %used.
+            %name and promote implied parameters
+            %form N-D TCM array based on ParamVar, and popluate
+            
+            %Top Down Method
+            %fill in ParamVar on master, with final ordering:
+            % 1. vector valued user params in VariableList
+            % 2. feature material assignment (in cell arrays)
+            % 3. vectorized material fields*
+            % 4. vectorized feature fields*
+            % 5. vectorized external parameters*
+            % 6. vectorized Params (time step)*
+            % * needs to be evaled using user supplied params
+            
+            %Bottom up method
+            %Progressivly expand dimensions as you find parameterizations.
+            %drawback is a lot of loops with nonallocated variables, 
+            %can't do sparse exploration of space,
+            %Benefit much more agnostic
+            
+            %Currently expands based on
+            % 1. User Params... for each permutation sub in and then
+                % 2. vectorized material fields using MatLib.GenerateCases
+                % 3. looping through PropList, expanding structure fields with
+                %       seperate ExpandTCMs for Matl, Q, xyz, then single val fields
+                % 4. finally, loop through and expand non struct properties.
+            %      
+            
+            TCMmaster=obj;  %Preserve the PPTCM object that's passed into the fuction.
+            PropList=properties(TCMmaster);
+            PropList=PropList(~strcmpi(PropList,'Version'));      %These properties will NOT be cycled through
+            PropList=PropList(~strcmpi(PropList,'VariableList')); %These properties will NOT be cycled through
+            PropList=PropList(~strcmpi(PropList,'MatLib'));       %These properties will NOT be cycled through
+            PropList=PropList(~strcmpi(PropList,'ParamVar'));     %These properties will NOT be cycled through
+            TCMmaster.ParamVar={}; %build ParamVar from scratch
+            
+            %Create MatLib mask that expands prop fields only in used materials.
+            MatsInUse=zeros(TCMmaster.MatLib.NumMat,1); %to hold scalar material assignments
+            pMatsInUse=MatsInUse; %to hold parametric material assignments
+            for Fi=1:length(TCMmaster.Features)
+                feat_mat=TCMmaster.Features(Fi).Matl;
+                if iscell(feat_mat) %feature mats held in cell(s)
+                    if ~isscalar(feat_mat) %feature mats prmtzd, pop. ParamVar
+                        if ~isempty(TCMmaster.Features(Fi).Desc)
+                            VarName=sprintf('%s(%0f).Mat',Fi,TCMmaster.Features(Fi).Desc,Fi);
+                        else
+                            VarName=sprintf('Feat(%0f).Mat',Fi);
+                        end
+                        TCMmaster.ParamVar{end+1,1}=VarName;           %define Parameter name
+                        TCMmaster.ParamVar{end+1,2}=feat_mat;  %drop array into value
+                    
+                        for P=1:numel(feat_mat) %scan and mask MatLib
+                            %we can't multi-compare using strcmpi since the
+                            %cell arrays need to be either same dim or one
+                            %scalar
+                            pMatsInUse=strcmpi(feat_mat{P},TCMmaster.MatLib.GetParam('Name')) | pMatsInUse;
+                        end
+                    else
+                        MatsInUse=strcmpi(feat_mat,TCMmaster.MatLib.GetParam('Name')) | MatsInUse;
+                    end
+                else
+                    MatsInUse=strcmpi(feat_mat,TCMmaster.MatLib.GetParam('Name')) | MatsInUse;
+                end
+            end
+            only_pMats=setdiff(pMatsInUse,MatsInUse); %the  mats that only appear as part of pmtzn
+            
+     
             if isempty(VectorParamList)
                 PermMatrix=0;
+                dim_lengths=1;
             else
                 %Get permutations of the vector parameter list
-%                 PermMatrix=[];
-%                 for Row=1:length(VectorParamList(:,1))  %Construct 1D vector of all possible indices of all variables
-%                     PermMatrix=[PermMatrix 1:length(VectorParamList{Row,2})];
-%                 end
-%                 PermMatrix=perms(PermMatrix);  %Compute permutations of all of those (square matrix that is product of dimensions)
-%                 PermMatrix=PermMatrix(:,1:length(VectorParamList(:,1))); %Keep number of columns equal to number of variables
-%                 PermMatrix=unique(PermMatrix,'rows'); %Retain only the unique rows
-%                 for VarI=1:length(VectorParamList(:,1)) %Keep only rows that have indices less than number of values in that variable
-%                     PermMatrix=PermMatrix(PermMatrix(:,VarI)<=length(VectorParamList{VarI,2}),:);
-%                 end
-                PermMatrix=reshape([1:length(VectorParamList{1,2})],[],1); %Start Perts with length of first variable
-                for I=2:length(VectorParamList(:,1))
-                    OldPerts=PermMatrix;  %Save the existing structure to add new column to
-                    PermMatrix=[OldPerts ones(size(PermMatrix(:,1)))];  %Add new column for I'th variable
-                    for I=2:length(VectorParamList{I,2})
-                        PermMatrix=[PermMatrix; OldPerts I*ones(size(OldPerts(:,1)))];
-                    end
-                end
+                %                 PermMatrix=[];
+                %                 for Row=1:length(VectorParamList(:,1))  %Construct 1D vector of all possible indices of all variables
+                %                     PermMatrix=[PermMatrix 1:length(VectorParamList{Row,2})];
+                %                 end
+                %                 PermMatrix=perms(PermMatrix);  %Compute permutations of all of those (square matrix that is product of dimensions)
+                %                 PermMatrix=PermMatrix(:,1:length(VectorParamList(:,1))); %Keep number of columns equal to number of variables
+                %                 PermMatrix=unique(PermMatrix,'rows'); %Retain only the unique rows
+                %                 for VarI=1:length(VectorParamList(:,1)) %Keep only rows that have indices less than number of values in that variable
+                %                     PermMatrix=PermMatrix(PermMatrix(:,VarI)<=length(VectorParamList{VarI,2}),:);
+                %                 end
+                
+                %                 PermMatrix=reshape([1:numel(VectorParamList{1,2})],[],1); %Start Perts with length of first variable
+                %                 for I=2:length(VectorParamList(:,1))
+                %                     OldPerts=PermMatrix;  %Save the existing structure to add new column to
+                %                     PermMatrix=[OldPerts ones(size(PermMatrix(:,1)))];  %Add new column for I'th variable
+                %                     for I=2:numel(VectorParamList{I,2})
+                %                         PermMatrix=[PermMatrix; OldPerts I*ones(size(OldPerts(:,1)))];
+                %                     end
+                %                 end
+                
+                %about twice as fast for crazy high # of cases
+                dim_lengths=cellfun('prodofsize',VectorParamList(:,2));
+                PermMatrix=cell(1,length(VectorParamList(:,1)));
+                [PermMatrix{:}]=ind2sub(dim_lengths,[1:prod(dim_lengths)]');
+                PermMatrix=cell2mat(PermMatrix);
+                %Do we need this at all for the few lines below?
             end
             
             ErrText='';
-            TCMmaster=obj;  %Preserve the PPTCM object that's passed into the fuction.
             
+            TCMoutFish=PPTCM.empty([dim_lengths 0]);  %allocate N-D array of non-parametric models with trailing zero length dimension
+
             NewSVarTCM=[];
             for Iperm=1:length(PermMatrix(:,1))
                 TCMout=obj;     %Set the starting point for the permuations of the PPTCM
@@ -257,11 +344,9 @@ classdef PPTCM  %PP Test Case Model
                 end
                 TCMout=NewTCM;
                 clear NewTCM
-                PropList=properties(TCMmaster);
-                PropList=PropList(~strcmpi(PropList,'Version'));      %These properties will NOT be cycled through
-                PropList=PropList(~strcmpi(PropList,'VariableList')); %These properties will NOT be cycled through
-                PropList=PropList(~strcmpi(PropList,'MatLib'));       %These properties will NOT be cycled through
-                PropList=PropList(~strcmpi(PropList,'ParamVar'));     %These properties will NOT be cycled through
+                
+                %% Looping Through PropList
+
                 for Ip=1:length(PropList)  %go through list of properties
                     ThisPropName=PropList{Ip}; %DEBUG
                     ThisPropVal=TCMmaster.(ThisPropName);
@@ -269,7 +354,7 @@ classdef PPTCM  %PP Test Case Model
                         error('Cell valued properties are not yet addressed.')
                     elseif strcmpi(ThisPropName,'FMopts')
                         
-                    elseif isstruct(ThisPropVal)
+                    elseif isstruct(ThisPropVal)        %e.g. Features, Params, ExternalProperties
                         for Ipe=1:length(ThisPropVal)   %go through each element when a property is an array
                             ThisPropValElement=ThisPropVal(Ipe);
                             FieldList=fieldnames(ThisPropValElement);
@@ -359,6 +444,9 @@ classdef PPTCM  %PP Test Case Model
                                             end
                                         end
                                         if (length(ThisFieldValElement) == 1) && (length(TCMout)==1)
+                                            if isnumeric(TCMout.(ThisPropName)(Ipe).(ThisFieldName))  %converts incoming Feature.x vectors to cells
+                                                TCMout.(ThisPropName)(Ipe).(ThisFieldName)=num2cell(TCMout.(ThisPropName)(Ipe).(ThisFieldName));
+                                            end
                                             TCMout.(ThisPropName)(Ipe).(ThisFieldName){Ife}=ThisFieldValElement;  %New
                                         else
                                             TCMout=ExpandTCM(TCMout, ThisFieldValElement, ThisPropName, Ipe, ThisFieldName, Ife);  %Keep w/o the if...then
@@ -388,6 +476,7 @@ classdef PPTCM  %PP Test Case Model
                                 end
                             end
                         end
+                        
                     else
                         if ischar(ThisPropVal)
                             try
@@ -403,9 +492,14 @@ classdef PPTCM  %PP Test Case Model
                                 ThisPropVal=[];
                             end
                         end
+                        %Expand nonstruct Poperty
                         TCMout=ExpandTCM(TCMout, ThisPropVal, ThisPropName);
+                        
+                        
                     end
                 end
+                
+                %Append to NewSVarTCM
                 NewSVarTCM=[NewSVarTCM TCMout];
             end
             TCMout=NewSVarTCM;
@@ -416,6 +510,7 @@ classdef PPTCM  %PP Test Case Model
             end
         end
         
+        %% Set and Get Functions
         function FeaturesOut=get.ExternalConditions(obj)
 %             if isempty(obj.iExternalConditions)
 %                 obj.ExternalConditions='Init';
@@ -617,6 +712,7 @@ classdef PPTCM  %PP Test Case Model
 %             end
         end
         
+        %% Constructor
         function obj = PPTCM(ExternalConditions, Features, Params, PottingMaterial, MatLib, varargin)  %Constructor
             obj.SymAvail=license('test','symbolic_toolbox');
 
@@ -673,6 +769,7 @@ classdef PPTCM  %PP Test Case Model
     end
 end
 
+%% Helper Functions
 %Validation functions
 function ValidLength(Array, Sz)
     if ~(all(size(Array)==Sz))
@@ -780,7 +877,7 @@ function [Scalar, Vector]=SeparateScalarVector(VariableList)
                 end
             end
         end
-        eval(VarEval); %Evaluate all the variables in order given.
+        eval(VarEval); %Evaluate all the variables in order given, puts variables into workspace.
         for Row=1:length(VariableList(:,1))
             if ~isempty(VariableList{Row,1})
                 eval(['TestVar=' VariableList{Row,1} ';'])
@@ -831,6 +928,9 @@ function TCMnew=ExpandTCM(TCMinstance, Values, Prop, Iprop, Field, Ifield)
                 TCMnew=[TCMnew TCMinstance(Itcm)];
                 if exist('Ifield','var')
 %                    disp(TCMinstance(Itcm).(Prop)(Iprop).(Field){Ifield}),fprintf('   '), disp(Values{Ival} ) %MSB
+                     if isnumeric(TCMnew(end).(Prop)(Iprop).(Field))
+                         TCMnew(end).(Prop)(Iprop).(Field)=num2cell(TCMnew(end).(Prop)(Iprop).(Field));
+                     end
                     TCMnew(end).(Prop)(Iprop).(Field){Ifield}=Values{Ival};
                     VarText=sprintf('TCM.%s(%.0f%s).%s(%.0f)',Prop,Iprop,FeatDesc,Field,Ifield);
                 elseif exist('Field','var')

@@ -522,9 +522,10 @@ MatsInUse=zeros(MatLib.NumMat,1);
 for Fi=1:length(Features)
     MatsInUse=strcmpi(Features(Fi).Matl,MatLib.GetParam('Name')) | MatsInUse;
 end
-MatsInUse=find(MatsInUse);
-%MatLib=MatLib(MatsInUse);  %Uncomment this line to limit the number of
-%materials include in MI
+%MatsInUse=find(MatsInUse);
+if FMopts.CulMats
+    MatLib=MatLib(MatsInUse);  %Uncomment this line to limit the number of materials include in MI
+end
 
 for Fi=1:length(Features)
     MatNum=find(strcmpi(Features(Fi).Matl,MatLib.GetParam('Name')));

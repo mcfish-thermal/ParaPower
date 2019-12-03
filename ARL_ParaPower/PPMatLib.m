@@ -1012,6 +1012,7 @@ classdef PPMatLib < matlab.mixin.Copyable
                     ThisPropName=ParamList{Iprop}; 
                     ThisPropVal=ThisMat.(ThisPropName);
                     if ~any(strcmpi(ThisPropName, ThisMat.NoExpandProps))
+                        %Place in cell if not already
                         if ischar(ThisPropVal)
                             ThisPropVal={ThisPropVal};
                         elseif isnumeric(ThisPropVal)
