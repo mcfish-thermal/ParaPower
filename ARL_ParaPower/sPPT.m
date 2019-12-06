@@ -398,6 +398,16 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
                     
                     Atrans=-spdiags(Cap,0,size(A,1),size(A,2))./delta_t(it-1);  %Save Transient term for the diagonal of A matrix, units W/K
                     C=-Cap./delta_t(it-1).*T(:,it); %units of watts
+                else  %update meltfract for ss analysis  %SINGLE PASS, does not consider changes in K
+                    if meltable
+                        MatGZVec=reshape(Mat(Mat>0),1,[]);
+                        Tmelt=MI.MatLib.GetParamVector('tmelt');
+                        for ThisMat=reshape(unique(MatGZVec(:)),1,[])
+                            MatMask=MatGZVec==ThisMat;
+                            PH(MatMask,end)=double(T(MatMask,end)>=Tmelt(ThisMat));
+                        end
+                    end
+                    
                 end
                 
                 %Time history of A and B are not being stored, instead overwritten
@@ -1106,12 +1116,24 @@ classdef sPPT < matlab.System & matlab.system.mixin.Propagates ...
     methods(Access = public)
          function obj=load_T_init(obj,T_init,times)
             % Load Predefined T_init distribution into internal state
+            % T_init is the N-D output array from a simulation, and times
+            % are the timesteps to be written to
+            if size(T_init,4)~=length(times)
+                error('Mismatched timestep info between T_init and times');
+            end
+            T_init=reshape(T_init,[],length(times));
             obj.T(:,times)=T_init(obj.Map,:);
          end
         
          function obj=load_PH_init(obj,PH_init,times)
-         % Load Predefined T_init distribution into internal state
-            obj.PH(:,times)=PH_init(obj.Map,:);
+             % Load Predefined T_init distribution into internal state
+             % PH_init is the N-D output array from a simulation, and times
+             % are the timesteps to be written to
+             if size(PH_init,4)~=length(times)
+                 error('Mismatched timestep info between T_init and times');
+             end
+             PH_init=reshape(PH_init,[],length(times));
+             obj.PH(:,times)=PH_init(obj.Map,:);
          end
     end
     

@@ -195,7 +195,21 @@ classdef PPTCM  %PP Test Case Model
                     end
                 end
             end
-                     
+            
+            if isempty(obj.iExpanded) || ~obj.iExpanded %ensure unexpanded F(i).x, y, z are cell arrays
+                for dim=['x' 'y' 'z']
+                    cell_mask=cell2mat(arrayfun(@(s) isnumeric(s.(dim)),obj.Features,'UniformOutput',false));
+                    if ~any(cell_mask)
+                        continue
+                    end
+                    %we will not call num2cell on fields already containing
+                    %cells, to avoid nesting
+                    feat_dims=arrayfun(@(s) num2cell(s.(dim)),obj.Features(cell_mask),'UniformOutput',false);
+                    [obj.Features(cell_mask).(dim)]=deal(feat_dims{:});
+                end
+                clear feat_dims cell_mask dim
+            end
+                        
             if ~isempty(ErrText)
                 error(ErrText)
             end
@@ -307,7 +321,7 @@ classdef PPTCM  %PP Test Case Model
             
             ErrText='';
             
-            TCMoutFish=PPTCM.empty([dim_lengths 0]);  %allocate N-D array of non-parametric models with trailing zero length dimension
+            %TCMoutFish=PPTCM.empty([dim_lengths 0]);  %allocate N-D array of non-parametric models with trailing zero length dimension
 
             NewSVarTCM=[];
             for Iperm=1:length(PermMatrix(:,1))
@@ -425,9 +439,6 @@ classdef PPTCM  %PP Test Case Model
                                         ErrText=[ErrText sprintf('Unknown form of Q in TCM.%s(%.0f).%s(%.0f).Q\n',ThisFieldValElement,ThisPropName, Ipe, ThisFieldName,Ife)];
                                     end
                                 elseif ismember(ThisFieldName,{'x', 'y', 'z'})  %X, Y, Z treated differently since they are more than 1 element
-                                    if isnumeric(ThisFieldVal)
-                                        ThisFieldVal=num2cell(ThisFieldVal);
-                                    end
                                     for Ife=1:length(ThisFieldVal)  %Go through each element of the field
                                         ThisFieldValElement=ThisFieldVal{Ife};
                                         if ischar(ThisFieldValElement)
@@ -698,6 +709,9 @@ classdef PPTCM  %PP Test Case Model
             if ~isempty(ErrText)
                 error(ErrText)
             end
+            
+            
+            
 %            if isempty(obj.iFeatures) %If no features exist, populate with an empty feature
                 obj.iFeatures=Input;
 %              else
@@ -908,6 +922,7 @@ function TCMnew=ExpandTCM(TCMinstance, Values, Prop, Iprop, Field, Ifield)
         
     
     TCMnew=[];
+    %enforce cell arrays
     if isnumeric(Values)
         Values=num2cell(Values);
     elseif ischar(Values)
@@ -928,9 +943,6 @@ function TCMnew=ExpandTCM(TCMinstance, Values, Prop, Iprop, Field, Ifield)
                 TCMnew=[TCMnew TCMinstance(Itcm)];
                 if exist('Ifield','var')
 %                    disp(TCMinstance(Itcm).(Prop)(Iprop).(Field){Ifield}),fprintf('   '), disp(Values{Ival} ) %MSB
-                     if isnumeric(TCMnew(end).(Prop)(Iprop).(Field))
-                         TCMnew(end).(Prop)(Iprop).(Field)=num2cell(TCMnew(end).(Prop)(Iprop).(Field));
-                     end
                     TCMnew(end).(Prop)(Iprop).(Field){Ifield}=Values{Ival};
                     VarText=sprintf('TCM.%s(%.0f%s).%s(%.0f)',Prop,Iprop,FeatDesc,Field,Ifield);
                 elseif exist('Field','var')

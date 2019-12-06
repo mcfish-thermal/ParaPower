@@ -524,7 +524,8 @@ for Fi=1:length(Features)
 end
 %MatsInUse=find(MatsInUse);
 if FMopts.CulMats
-    MatLib=MatLib(MatsInUse);  %Uncomment this line to limit the number of materials include in MI
+    %MatLib=MatLib(MatsInUse);  %Uncomment this line to limit the number of materials include in MI
+    %not functioning yet
 end
 
 for Fi=1:length(Features)
